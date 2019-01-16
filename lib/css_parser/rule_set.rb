@@ -18,6 +18,7 @@ module CssParser
       @selectors = []
       @specificity = specificity
       @declarations = {}
+      @prop_cache = {}
       @order = 0
       parse_selectors!(selectors) if selectors
       parse_declarations!(block)
@@ -25,16 +26,20 @@ module CssParser
 
     # Get the value of a property
     def get_value(property)
-      return '' unless property and not property.empty?
-
-      property = property.downcase.strip
-      properties = @declarations.inject(String.new) do |val, (key, data)|
-        #puts "COMPARING #{key} #{key.inspect} against #{property} #{property.inspect}"
-        importance = data[:is_important] ? ' !important' : ''
-        val << "#{data[:value]}#{importance}; " if key.downcase.strip == property
-        val
+      @prop_cache[property] ||= begin
+        if property && !property.empty?
+          property = property.downcase.strip
+          properties = @declarations.inject(String.new) do |val, (key, data)|
+            #puts "COMPARING #{key} #{key.inspect} against #{property} #{property.inspect}"
+            importance = data[:is_important] ? " !important" : ""
+            val << "#{data[:value]}#{importance}; " if key.downcase.strip == property
+            val
+          end
+          properties ? properties.strip : ""
+        else
+          ""
+        end
       end
-      return properties ? properties.strip : ''
     end
     alias_method :[], :get_value
 
@@ -62,6 +67,7 @@ module CssParser
       property = property.downcase
       property.strip!
       #puts "SAVING #{property}  #{value} #{is_important.inspect}"
+      reset_cache!
       @declarations[property] = {
         :value => value, :is_important => is_important, :order => @order += 1
       }
@@ -72,6 +78,7 @@ module CssParser
     #
     #  rule_set.remove_declaration!('color')
     def remove_declaration!(property)
+      reset_cache!
       @declarations.delete(property)
     end
 
@@ -156,6 +163,7 @@ module CssParser
       split_declaration('background', 'background-size', extract_background_size_from(value))
       split_declaration('background', 'background-position', value.slice(CssParser::RE_BACKGROUND_POSITION))
 
+      reset_cache!
       @declarations.delete('background')
     end
 
@@ -177,6 +185,7 @@ module CssParser
         split_declaration(k, "#{k}-color", value.slice!(CssParser::RE_COLOUR))
         split_declaration(k, "#{k}-style", value.slice!(CssParser::RE_BORDER_STYLE))
 
+        reset_cache!
         @declarations.delete(k)
       end
     end
@@ -227,6 +236,7 @@ module CssParser
         split_declaration(property, expanded % 'bottom', b)
         split_declaration(property, expanded % 'left', l)
 
+        reset_cache!
         @declarations.delete(property)
       end
     end
@@ -284,6 +294,7 @@ module CssParser
 
       font_props.each { |font_prop, font_val| @declarations[font_prop] = {:value => font_val, :is_important => is_important, :order => order} }
 
+      reset_cache!
       @declarations.delete('font')
     end
 
@@ -306,6 +317,7 @@ module CssParser
       split_declaration('list-style', 'list-style-position', value.slice!(CssParser::RE_INSIDE_OUTSIDE))
       split_declaration('list-style', 'list-style-image', value.slice!(Regexp.union(CssParser::URI_RX, /none/i)))
 
+      reset_cache!
       @declarations.delete('list-style')
     end
 
@@ -335,6 +347,7 @@ module CssParser
           @declarations.delete(property)
         end
 
+        reset_cache!
         @declarations[shorthand_property] = {:value => values.join(' ')}
       end
     end
@@ -353,6 +366,7 @@ module CssParser
           @declarations['background-position'] = {:value => '0% 0%'}
         end
 
+        reset_cache!
         @declarations['background-size'][:value] = "/ #{@declarations['background-size'][:value]}"
       end
 
@@ -378,6 +392,7 @@ module CssParser
       @declarations.delete('border-width')
       @declarations.delete('border-style')
       @declarations.delete('border-color')
+      reset_cache!
 
       unless values.empty?
         @declarations['border'] = {:value => values.join(' ')}
@@ -421,6 +436,7 @@ module CssParser
 
           new_value.strip!
           @declarations[property] = {:value => new_value.strip} unless new_value.empty?
+          reset_cache!
 
           # Delete the longhand values
           directions.each { |d| @declarations.delete(expanded % d) }
@@ -459,7 +475,7 @@ module CssParser
        'line-height', 'font-family'].each do |prop|
        @declarations.delete(prop)
       end
-
+      reset_cache!
     end
 
     # Looks for long format CSS list-style properties (e.g. <tt>list-style-type</tt>) and
@@ -471,6 +487,10 @@ module CssParser
     end
 
   private
+
+    def reset_cache!
+      @prop_cache.clear
+    end
 
     # utility method for re-assign shorthand elements to longhand versions
     def split_declaration(src, dest, v)  # :nodoc:
